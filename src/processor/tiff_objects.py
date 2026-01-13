@@ -408,7 +408,7 @@ class EMCCDimage:
 
         # Pad to expanded_size for large-q data 
         if expanded_size != 1024 and expanded_size%2 == 0:
-            pad_size = expanded_size/2 - 512
+            pad_size = int(expanded_size / 2 - 1024 / 2)
             self.processed_data = np.pad(self.processed_data, ((pad_size, pad_size), (pad_size, pad_size)), mode='constant', constant_values=np.nan)
 
     def get_processed_data(self) -> np.ndarray:
@@ -734,7 +734,7 @@ class EMCCDimage:
             args=(radial_masks,),
             method='Nelder-Mead', 
             options={
-                'disp': True,
+                'disp': False,
                 'initial_simplex': initial_simplex,
                 'maxiter': max_iter,
                 'xatol': 1,  # Coordinate tolerance
@@ -899,3 +899,49 @@ class EMCCDimage:
                 pixel_counts[i] = np.sum(mask)
         
         return bin_centers, radial_average
+
+    def plot_radial_eccentricity(self) -> np.ndarray:
+        """
+        Subtracts each pixel from the average of all pixels at the same 
+        radial distance from the center, ignoring NaNs in the calculation.
+        
+        Args:
+            data: 2D float numpy array.
+            center: Tuple of (center_x, center_y).
+            
+        Returns:
+            np.ndarray: The processed array highlighting asymmetry.
+        """
+        h, w = self.processed_data.shape
+        cx, cy = self.center_pos
+
+        # 1. Create coordinate grid and radial distances
+        y, x = np.indices((h, w))
+        r = np.sqrt((x - cx)**2 + (y - cy)**2)
+        r_int = np.round(r).astype(int)
+
+        # 2. Identify where data is valid (not NaN)
+        valid_mask = ~np.isnan(self.processed_data)
+        
+        # Flatten everything for bincount processing
+        r_flat = r_int.ravel()
+        data_flat = self.processed_data.ravel()
+        valid_flat = valid_mask.ravel()
+
+        # 3. Calculate Sums and Counts, ignoring NaNs
+        # We only pass data where valid_flat is True
+        ring_sum = np.bincount(r_flat[valid_flat], weights=data_flat[valid_flat])
+        ring_count = np.bincount(r_flat[valid_flat])
+
+        # 4. Calculate ring averages (safe division for empty rings)
+        ring_averages = np.divide(ring_sum, ring_count, 
+                                out=np.zeros_like(ring_sum, dtype=float), 
+                                where=ring_count != 0)
+
+        # 5. Map averages back to the grid and subtract
+        # Note: Pixels that were NaN in the original data will remain NaN 
+        # because (number - np.nan) = np.nan
+        r_int = np.clip(r_int, 0, len(ring_averages)-1)
+        average_map = ring_averages[r_int] 
+        
+        return average_map - self.processed_data

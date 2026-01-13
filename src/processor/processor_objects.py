@@ -143,7 +143,7 @@ class XPSGroupProcessor:
         
         self.logger.info(f"X-ray statistics precomputation completed. Center region ({center_region_size}x{center_region_size}) excluded.")
 
-    def process_single(self, filepath: str) -> Optional['ProcessedResult']:
+    def process_single(self, filepath: str, expanded_size: int = 1024) -> Optional['ProcessedResult']:
         """
         Process a single image file.
         
@@ -154,11 +154,11 @@ class XPSGroupProcessor:
             ProcessedResult object if successful, None if failed
         """
         try:
-            #self.logger.info(f"Processing: {Path(filepath).name}")
-            
+        #self.logger.info(f"Processing: {Path(filepath).name}")
+        
             # Load image file
             image_file = EMCCDimage(load_tiff_single(filepath))
-
+            
             # Remove background
             # with timer('bkg_removal'):
             image_file.remove_background(
@@ -168,10 +168,10 @@ class XPSGroupProcessor:
                 self.X_ray_config[0],  # sigma_threshold
                 self.X_ray_config[1]   # expansion_threshold_ratio
             )
-
+            
             # Masking valid signal
-            image_file.apply_data_mask(self.data_mask_data)
-
+            image_file.apply_data_mask(self.data_mask_data, expanded_size)
+            
             # Find diffraction center
             # with timer('center_finding'):
             # center = image_file.iterative_ring_centroid(
@@ -184,14 +184,17 @@ class XPSGroupProcessor:
                 radial_masks=self.center_config[0],  # ring_mask
                 initial_guess=self.center_config[1]   # initial_guess
             )
+            # Convert the center pos back
+            pad_size = int(expanded_size / 2 - 1024 / 2)
+            center = (center[0]-pad_size, center[1]-pad_size)
             
             # Calculate azimuthal average
-            #with timer('azimuthal_avg'):
+            # with timer('azimuthal_avg'):
             bin_centers, radial_average = image_file.azimuthal_average_bincount(
                 self.azimuthal_config[0],  # radial_masks
                 self.azimuthal_config[1]   # azimuthal_mask dict
             )
-
+            
             # Create result object
             result = ProcessedResult(
                 filename=Path(filepath).name,
@@ -208,8 +211,10 @@ class XPSGroupProcessor:
             self.failed_files.append((filepath, str(e)))
             return None
 
-    def process_single_debug(self, filepath: str, plot_min_raw: float = None, plot_max_raw: float = None,
-                             plot_min: float = None, plot_max: float = None) -> None:
+    def process_single_debug(self, filepath: str, 
+                             plot_min_raw: float = None, plot_max_raw: float = None,
+                             plot_min: float = None, plot_max: float = None,
+                             expanded_size: int = 1024) -> None:
         """
         Debug version: Process a single image file with extensive plotting and printing.
         
@@ -248,7 +253,7 @@ class XPSGroupProcessor:
 
             # Masking valid signal
             print(f"\n3. MASKING DATA:")
-            image_file.apply_data_mask(self.data_mask_data)
+            image_file.apply_data_mask(self.data_mask_data, expanded_size)
 
             # Plot after masking
             print(f"After data masking:")
@@ -260,6 +265,9 @@ class XPSGroupProcessor:
                     radial_masks=self.center_config[0],  # ring_mask
                     initial_guess=self.center_config[1]   # initial_guess
                 )
+            # Convert the center pos back
+            pad_size = int(expanded_size / 2 - 1024 / 2)
+            center = (center[0]-pad_size, center[1]-pad_size)
             print(f"Found center: ({center[0]:.2f}, {center[1]:.2f})")
 
             # Calculate azimuthal average
@@ -283,7 +291,7 @@ class XPSGroupProcessor:
             traceback.print_exc()
             self.failed_files.append((filepath, str(e)))
 
-    def process_group(self, batch_size: int = 500) -> None:
+    def process_group(self, batch_size: int = 50) -> None:
         """
         Process all files in the filelist.
         
@@ -314,15 +322,18 @@ class XPSGroupProcessor:
         # Precompute X-ray statistics once for the entire group
         self.precompute_xray_statistics()
 
+        # Exract the expanded_size from mask used
+        expanded_size = self.center_config[0].image_shape[0]
+
         for batch_num, i in enumerate(range(0, total_files, batch_size)):
             batch_files = self.filelist[i:i + batch_size]
             batch_results = []
             
             for filepath in batch_files:
-                result = self.process_single(filepath)
+                result = self.process_single(filepath, expanded_size)
                 if result is not None:
                     batch_results.append(result)
-                    self.processed_files += ['filepath']
+                    self.processed_files += filepath
             
             # Save batch to the same Parquet file
             if batch_results:
@@ -455,6 +466,16 @@ class XPSGroupProcessor:
         filename = f"processed_{self.xps_value:.5f}.yaml"
         filepath = directory / filename
         
-        # Save ONLY the list to YAML file
+        # 1. Load existing data if it exists
+        existing_files = []
+        if filepath.exists():
+            with open(filepath, 'r') as f:
+                existing_files = yaml.safe_load(f) or []
+
+        # 2. Combine with new files (and remove duplicates just in case)
+        # Using a list comprehension to preserve order while adding new items
+        updated_list = existing_files + [f for f in processed_filelist if f not in existing_files]
+
+        # 3. Save the full combined list back to disk
         with open(filepath, 'w') as f:
-            yaml.dump(processed_filelist, f, default_flow_style=False)
+            yaml.dump(updated_list, f, default_flow_style=False)

@@ -79,8 +79,9 @@ def extract_xps_value(filename: str) -> float:
     
     if match:
         return float(match.group(1))
-    # In case of no matching pattern, return 0 (..._noxps0_...)
-    return 0
+    else:
+        # In case of no matching pattern, return 0 (..._noxps0_...)
+        return 0
 
 def group_tiff_files_with_info(directory: str) -> List[Tuple[float, List[str]]]:
     """
@@ -357,3 +358,41 @@ def calculate_weighted_xps(cluster: List[Tuple[float, List[str]]]) -> float:
     
     weighted_sum = sum(xps * len(files) for xps, files in cluster)
     return weighted_sum / total_files
+
+def merge_xps_groups_informed(groups_with_xps: List[Tuple[float, List[str]]],
+                                manual_groups_xps_values: List[float]) -> List[Tuple[float, List[str]]]:
+    """
+    Merges original XPS groups into buckets defined by the nearest value 
+    in manual_groups_xps_values.
+    """
+    
+    # Initialize buckets for each manual target value
+    # Key: index of the target value in manual_groups_xps_values
+    results_map = {i: {"weighted_sum": 0.0, "count": 0, "files": []} 
+                   for i in range(len(manual_groups_xps_values))}
+
+    for orig_xps, files in groups_with_xps:
+        num_files = len(files)
+        
+        # 1. Find the index of the nearest target XPS value
+        # Using min() with a lambda to find the closest value in the list
+        best_idx = min(
+            range(len(manual_groups_xps_values)), 
+            key=lambda i: abs(orig_xps - manual_groups_xps_values[i])
+        )
+        
+        # 2. Add data to the corresponding bucket
+        bucket = results_map[best_idx]
+        bucket["weighted_sum"] += (orig_xps * num_files)
+        bucket["count"] += num_files
+        bucket["files"].extend(files)
+
+    # 3. Compile results and calculate the final weighted average
+    final_groups = []
+    for i in range(len(manual_groups_xps_values)):
+        data = results_map[i]
+        if data["count"] > 0:
+            avg_xps = data["weighted_sum"] / data["count"]
+            final_groups.append((avg_xps, data["files"]))
+            
+    return final_groups

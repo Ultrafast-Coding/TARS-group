@@ -9,7 +9,7 @@ from dataclasses import asdict
 import json
 
 from src.processor.processor_objects import XPSGroupProcessor
-from src.utils.xps_value_sort import group_tiff_files_with_info, merge_xps_groups_manual, merge_xps_groups_strategy
+from src.utils.xps_value_sort import group_tiff_files_with_info, merge_xps_groups_manual, merge_xps_groups_strategy, merge_xps_groups_informed
 from src.io.tiff_SL import load_tiff_single
 from src.masks.mask_class import precompute_ring_mask, precompute_radial_masks, precompute_azimuthal_average_masks, precompute_center_masks
 from src.utils.processing_utils import ProcessingConfig
@@ -43,6 +43,7 @@ class DirectoryProcessor:
         self.xray_removal_param = xray_removal_param
         self.center_fitting_param = center_fitting_param
         self.azimuthal_avg_param = azimuthal_avg_param
+        self.mask_size = int(2*azimuthal_avg_param[0])
         self.background_directory = background_directory
         self.background_data = None
         self.data_mask_directory = data_mask_directory
@@ -70,20 +71,24 @@ class DirectoryProcessor:
         # Extract parameters
         inner_radius, outer_radius, center_x, center_y = self.center_fitting_param
         radius, num_bins = self.azimuthal_avg_param
-        initial_guess = (center_x, center_y)
-        
+        # Convert the center guess
+        pad_size = int(self.mask_size / 2 - 1024 / 2)
+        initial_guess = (center_x + pad_size, center_y + pad_size)
+        print(initial_guess)
         # Initialize ring mask
         # ring_mask = precompute_ring_mask(
         #     inner_radius=inner_radius, 
         #     outer_radius=outer_radius
         # )
         ring_mask = precompute_center_masks(
+            image_shape=(self.mask_size,self.mask_size),
             inner_radius=inner_radius, 
             outer_radius=outer_radius
         )
 
         # Initialize radial masks
         radial_masks = precompute_radial_masks(
+            image_shape=(self.mask_size,self.mask_size),
             radius=radius, 
             num_bins=num_bins
         )
@@ -168,13 +173,13 @@ class DirectoryProcessor:
         # Display group information
         print(f"\nXPS Groups Summary:")
         print("=" * 40)
-        for xps_value, files in self.merged_groups:
+        for xps_value, files in groups_with_xps:
             print(f"XPS {xps_value:.5f}: {len(files)} files")
-        print(f"\nTotal: {len(self.merged_groups)} XPS groups")
+        print(f"\nTotal: {len(groups_with_xps)} XPS groups")
 
         # Group manually to ensure xps consistancy
         manual_groups = self.xps_grouping_param
-        self.merged_groups = merge_xps_groups_manual(
+        self.merged_groups = merge_xps_groups_informed(
             groups_with_xps,
             manual_groups)
         
@@ -320,12 +325,12 @@ class DirectoryProcessor:
         xps_value, filelist = xps_group
         
         # Create result directory for this XPS group
-        group_result_dir = self.result_directory / analyze_no 
+        group_result_dir = self.result_directory / 'results' / analyze_no
         
-        with self.lock:
-            if group_result_dir.exists():
-                raise FileExistsError(f"Result directory already exists: {group_result_dir}")
-            group_result_dir.mkdir(parents=True, exist_ok=True)
+        # with self.lock:
+        #     if group_result_dir.exists():
+        #         raise FileExistsError(f"Result directory already exists: {group_result_dir}")
+        #     group_result_dir.mkdir(parents=True, exist_ok=True)
         
         self.logger.info(f"Processing XPS group {xps_value:.5f} with {len(filelist)} files")
         
@@ -341,7 +346,7 @@ class DirectoryProcessor:
             resultdir=str(group_result_dir)
         )
         
-        processor.process_group(batch_size=500)
+        processor.process_group(batch_size=300)
         self.logger.info(f"Completed processing XPS group {xps_value:.5f}")
 
     def process_in_sequence(self, analyze_no: str) -> None:
