@@ -6,19 +6,20 @@ sys.path.insert(0, project_root)
 from pathlib import Path
 from src.processor.expdir_processor import DirectoryProcessor
 
-Expdata_folder = Path(r"E:\20251005\day2_61deg_longscan3\fist_AndorEMCCD")
-Result_folder = Path(r"C:\Users\ab177\Desktop\diffraction_results\test")
+Expdata_folder = Path(r"E:\20251011\5_longscan_42deg_uv62p4deg_1\fist_AndorEMCCD")
+Result_folder = Path(r"C:\Users\ab177\Desktop\diffraction_results\1011long")
 
 # Initialize DirectoryProcessor
 processor = DirectoryProcessor(
     result_directory=Result_folder,
     data_directory=Expdata_folder,
-    xps_grouping_param=[173.1845,173.0346,172.50995,172.49496,
-                        172.47997,172.46498,172.44999,172.435,
-                        172.42001,172.40502,172.39003,172.37504,
-                        172.36005,172.34506,172.31508,172.2851],  # [threshold, tolerance]
+    xps_grouping_param='180.362	180.2121	179.67246	179.664965	179.65747	179.649975	\
+        179.643979	179.639482	179.634985	179.630488	179.625991	179.621494	179.616997	\
+        179.6125	179.608003	179.603506	179.599009	179.594512	179.590015	179.585518	\
+        179.581021	179.575025	179.56753	179.560035	179.55254	179.545045	179.53755	\
+        179.52256	179.50757	179.49258	179.47759	179.4626',  # str of xps values copied from data_acquisition_logfile.
     xray_removal_param=[15, 0.7],  # [beam_threshold, expansion_threshold_ratio]
-    center_fitting_param=[60, 120, 542, 485],  # [inner_radius, outer_radius, center_x, center_y]
+    center_fitting_param=[70, 100, 721, 692],  # [inner_radius, outer_radius, center_x, center_y]
     azimuthal_avg_param=[720, 720],  # [radius, num_bins]
     background_directory="default",
     data_mask_directory="default"
@@ -28,7 +29,7 @@ processor = DirectoryProcessor(
 #processor.process_in_sequence("analysis_in_sequence")
 
 # Or process in parallel
-processor.process_in_parallel(max_workers=8, analyze_no="analysis_center_test")
+processor.process_in_parallel(max_workers=8, analyze_no="analysis_logic_test")
 
 # Load existing configuration
 #processor.load_config("analysis_001")

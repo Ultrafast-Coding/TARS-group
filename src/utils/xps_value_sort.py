@@ -360,39 +360,40 @@ def calculate_weighted_xps(cluster: List[Tuple[float, List[str]]]) -> float:
     return weighted_sum / total_files
 
 def merge_xps_groups_informed(groups_with_xps: List[Tuple[float, List[str]]],
-                                manual_groups_xps_values: List[float]) -> List[Tuple[float, List[str]]]:
+                                xps_values_str: str) -> List[Tuple[float, List[str]]]:
     """
     Merges original XPS groups into buckets defined by the nearest value 
-    in manual_groups_xps_values.
+    in the manual_groups_xps_values string.
+
+    xps_values_str: string of set xps values seperated by space(copied from data_acquisition_logfile).
     """
+    # 1. Convert the space-separated string into a list of floats
+    manual_targets = [float(x) for x in xps_values_str.split()]
     
-    # Initialize buckets for each manual target value
-    # Key: index of the target value in manual_groups_xps_values
-    results_map = {i: {"weighted_sum": 0.0, "count": 0, "files": []} 
-                   for i in range(len(manual_groups_xps_values))}
+    if not manual_targets:
+        return []
+
+    # 2. Initialize buckets using the index of each target
+    # We store the target value itself and the list of files
+    results_map = {i: {"target_val": val, "files": []} 
+                   for i,val in enumerate(manual_targets)}
 
     for orig_xps, files in groups_with_xps:
-        num_files = len(files)
-        
-        # 1. Find the index of the nearest target XPS value
-        # Using min() with a lambda to find the closest value in the list
+        # 3. Find the index of the nearest target XPS value
         best_idx = min(
-            range(len(manual_groups_xps_values)), 
-            key=lambda i: abs(orig_xps - manual_groups_xps_values[i])
+            range(len(manual_targets)), 
+            key=lambda i: abs(orig_xps - manual_targets[i])
         )
         
-        # 2. Add data to the corresponding bucket
-        bucket = results_map[best_idx]
-        bucket["weighted_sum"] += (orig_xps * num_files)
-        bucket["count"] += num_files
-        bucket["files"].extend(files)
+        # 4. Add files to the corresponding bucket
+        results_map[best_idx]["files"].extend(files)
 
-    # 3. Compile results and calculate the final weighted average
+    # 5. Compile results using the manual target value as the identity
     final_groups = []
-    for i in range(len(manual_groups_xps_values)):
+    for i in range(len(manual_targets)):
         data = results_map[i]
-        if data["count"] > 0:
-            avg_xps = data["weighted_sum"] / data["count"]
-            final_groups.append((avg_xps, data["files"]))
+        # Only include groups that actually caught some files
+        if data["files"]:
+            final_groups.append((data["target_val"], data["files"]))
             
     return final_groups

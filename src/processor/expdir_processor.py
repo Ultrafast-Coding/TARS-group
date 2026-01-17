@@ -313,7 +313,7 @@ class DirectoryProcessor:
             except ValueError:
                 print("Please enter a valid number or 'q' to quit")
 
-    def process_xps_group(self, xps_group: Tuple[float, List[str]], analyze_no: str) -> None:
+    def process_xps_group(self, xps_group: Tuple[float, List[str]], group_result_dir: Path) -> None:
         """
         Process a single XPS group.
         
@@ -325,13 +325,13 @@ class DirectoryProcessor:
         xps_value, filelist = xps_group
         
         # Create result directory for this XPS group
-        group_result_dir = self.result_directory / 'results' / analyze_no
+        # group_result_dir = self.result_directory / 'results' / analyze_no
         
         # with self.lock:
         #     if group_result_dir.exists():
         #         raise FileExistsError(f"Result directory already exists: {group_result_dir}")
         #     group_result_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.logger.info(f"Processing XPS group {xps_value:.5f} with {len(filelist)} files")
         
         # Initialize and run XPSGroupProcessor
@@ -403,12 +403,20 @@ class DirectoryProcessor:
         
         # Save config before processing
         self.save_config(analyze_no)
+
+        group_result_dir = self.result_directory / analyze_no / 'results'
+        
+        with self.lock:
+            if group_result_dir.exists():
+                # raise FileExistsError(f"Result directory already exists: {group_result_dir}")
+                print(f"Result directory already exists: {group_result_dir}")
+            group_result_dir.mkdir(parents=True, exist_ok=True)
         
         # Process groups in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_group = {
-                executor.submit(self.process_xps_group, group, analyze_no): group 
+                executor.submit(self.process_xps_group, group, group_result_dir): group 
                 for group in self.merged_groups
             }
             
@@ -466,7 +474,7 @@ class DirectoryProcessor:
         Args:
             analyze_no: Analysis number for organizing results
         """
-        config_dir = self.result_directory / analyze_no
+        config_dir = self.result_directory / analyze_no / 'config'
         config_dir.mkdir(parents=True, exist_ok=True)
         
         # Create config object

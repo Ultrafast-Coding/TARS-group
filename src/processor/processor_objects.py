@@ -291,7 +291,7 @@ class XPSGroupProcessor:
             traceback.print_exc()
             self.failed_files.append((filepath, str(e)))
 
-    def process_group(self, batch_size: int = 50) -> None:
+    def process_group(self, batch_size: int = 100) -> None:
         """
         Process all files in the filelist.
         
@@ -314,7 +314,11 @@ class XPSGroupProcessor:
                 print(f"Excluded {excluded_count} already processed files for group {self.xps_value:.5f}")
 
         total_files = len(self.filelist)
-        self.logger.info(f"Starting batch processing of {total_files} files")
+        if total_files != 0:
+            self.logger.info(f"Starting batch processing of {total_files} files")
+        else: 
+            self.logger.info(f"Skipping XPS group {self.xps_value:.5f}, no new files!")
+            return
 
         start_time = time.time()
         batch_results = []
@@ -333,7 +337,7 @@ class XPSGroupProcessor:
                 result = self.process_single(filepath, expanded_size)
                 if result is not None:
                     batch_results.append(result)
-                    self.processed_files += filepath
+                    self.processed_files += [filepath]
             
             # Save batch to the same Parquet file
             if batch_results:

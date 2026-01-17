@@ -122,8 +122,8 @@ def precompute_center_masks(image_shape: Tuple[int, int] = (1024,1024), inner_ra
         RadialMasks: Precomputed radial masks object
     """
     height, width = image_shape
-    MAX_POINTS_PER_MASK = 1000
-    RING_NUM = 4
+    MAX_POINTS_PER_MASK = 500
+    RING_NUM = 3
 
     # Create coordinate grids centered at image center
     y_coords, x_coords = np.mgrid[:height, :width]
