@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import yaml
 from pathlib import Path
+from typing import List
 
 class XPSAggregator:
     def __init__(self, output_dir: Path, max_bin: int):
@@ -12,8 +13,20 @@ class XPSAggregator:
     def _get_radial_cols(self, df):
         return [f'radial_bin_{i:03d}' for i in range(self.max_bin)]
 
-    def aggregate_directory(self, filtered_dir: Path, rad_min: int, rad_max: int):
-        files = list(filtered_dir.glob("*xps_*.parquet"))
+    def aggregate_directory(self, filtered_dir: Path, rad_min: int, rad_max: int, cluster_list: List, result_name: str='full'):
+        '''
+        aggregate_directory Docstring
+        
+        :param filtered_dir: should be /filteredGMM
+        :type filtered_dir: Path
+        :param rad_min, rad_max: normalizing min/max radius 
+        :type rad_min, rad_max: int
+        :param cluster_list: list of cluster number to keep, input empty list to skip this
+        :type cluster_list: List
+        :param result_name: Used to distinguish clusters
+        '''
+
+        files = list(filtered_dir.glob("*auto_filtered_xps_*.parquet"))
         results = {}
 
         for f in files:
@@ -23,12 +36,23 @@ class XPSAggregator:
             except Exception:
                 xps_key = f.stem
 
-            df = pd.read_parquet(f)
-            if df.empty:
+            df_raw = pd.read_parquet(f)
+            if df_raw.empty:
                 continue
 
             # Identify all columns (0-719)
-            all_cols = self._get_radial_cols(df)
+            all_cols = self._get_radial_cols(df_raw)
+
+            if len(cluster_list) != 0:
+                # We create a mask to keep only the selecterd clusters
+                cluster_mask = df_raw['cluster_pass2'].isin(cluster_list)
+                # Apply the mask to the dataframe
+                df = df_raw[cluster_mask].copy()
+                # Print the number of rows kept for transparency
+                print(f"Keeping {len(df)} rows from clusters {cluster_list} (discarded {len(df_raw) - len(df)} ).")
+            else:
+                df = df_raw.copy()
+
             data_all = df[all_cols].values
 
             norm_cols = [f'radial_bin_{i:03d}' for i in range(rad_min,rad_max,4)]
@@ -60,10 +84,10 @@ class XPSAggregator:
                     "sem": sem_profile.tolist()
                 }
             }
-            print(f"Aggregated {f.name}: {num_samples} frames (Full 720 bins).")
+            print(f"Aggregated {f.name}: {num_samples} frames.")
 
         # Save to YAML
-        output_file = self.output_dir / "xps_statistics_full.yaml"
+        output_file = self.output_dir / f"xps_statistics_{result_name}.yaml"
         with open(output_file, 'w') as y_file:
             yaml.dump(results, y_file, default_flow_style=False, sort_keys=True)
         

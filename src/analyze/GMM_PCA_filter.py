@@ -5,10 +5,14 @@ from pathlib import Path
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import HDBSCAN
 
 class XPSFilter:
     def __init__(self, n_pca=3):
         self.n_pca = n_pca
+        self.gmmtype = 'full'
+        self.useHDBSCAN = False
+        self.cluster_size = 500
         
     def _get_radial_cols(self, df):
         return [f'radial_bin_{i:03d}' for i in range(0,255,8)]
@@ -36,25 +40,41 @@ class XPSFilter:
         scaled = StandardScaler().fit_transform(data)
         pca_features = PCA(n_components=self.n_pca).fit_transform(scaled)
         
-        gmm = GaussianMixture(n_components=n_comp, random_state=42)
-        labels = gmm.fit_predict(pca_features)
+        if not self.useHDBSCAN:
+            gmm = GaussianMixture(n_components=n_comp, covariance_type=self.gmmtype, random_state=42)
+            labels = gmm.fit_predict(pca_features)
+        else:
+            clusterer = HDBSCAN(min_cluster_size=self.cluster_size) 
+            labels = clusterer.fit_predict(pca_features)
         
         # --- CONSISTENCY FIX: Sort by Size ---
-        # Find the mapping from old labels to new labels based on count
-        unique, counts = np.unique(labels, return_counts=True)
+        # Find the mapping from old labels to new labels based on count, ignoring noise (-1)
+        valid_mask = (labels != -1)
+        unique, counts = np.unique(labels[valid_mask], return_counts=True)
         # Sort indices by counts descending
-        sorted_indices = np.argsort(-counts) 
-        # Create a mapping dictionary: {old_label: new_rank}
-        label_map = {old: new for new, old in enumerate(sorted_indices)}
-        
-        # Apply the mapping
-        labels = np.array([label_map[l] for l in labels])
-        # -------------------------------------
+        sorted_indices = unique[np.argsort(-counts)]
+
+        if self.useHDBSCAN:
+            largest_id = sorted_indices[0]
+            # --- HDBSCAN SPECIFIC: Merge fragments into State 1 ---
+            new_labels = np.full_like(labels, -1)  # Initialize everything as noise
+            new_labels[labels == largest_id] = 0   # Largest core
+            
+            # Merge all other valid fragments (IDs 1, 2, 3...) into State 1
+            other_clusters_mask = (labels != largest_id) & (labels != -1)
+            new_labels[other_clusters_mask] = 1
+            labels = new_labels
+            
+        else:
+            # --- GMM SPECIFIC: Standard Size-Ranking ---
+            # Map clusters to 0, 1, 2... based strictly on size
+            label_map = {old: new for new, old in enumerate(sorted_indices)}
+            labels = np.array([label_map[l] for l in labels])
 
         df[f'cluster_{label_suffix}'] = labels
         return df, pca_features, labels
 
-    def process_with_manual_filter(self, file_path: Path):
+    def process_with_manual_filter(self, file_path: Path, output_dir: Path, pass2_with_HDBSCAN: bool=False):
         """One-file testing mode: lets you choose params interactively."""
         df = pd.read_parquet(file_path)
         original_count = len(df)
@@ -73,7 +93,13 @@ class XPSFilter:
 
         # PASS 2
         n2 = int(input("Pass 2: How many components (n2)? "))
-        df, pca2, labels2 = self._apply_gmm(df, n2, "pass2")
+        if not pass2_with_HDBSCAN:
+            df, pca2, labels2 = self._apply_gmm(df, n2, "pass2")
+        else:
+            self.useHDBSCAN = True
+            df, pca2, labels2 = self._apply_gmm(df, n2, "pass2")
+            self.useHDBSCAN = False
+
         self.visualize_gmm(pca2, labels2, f"{file_path.name} - Pass 2")
         
         print(df['cluster_pass2'].value_counts(normalize=True) * 100)
@@ -82,6 +108,12 @@ class XPSFilter:
         if discard2:
             ids = [int(x.strip()) for x in discard2.split(',')]
             df = df[~df['cluster_pass2'].isin(ids)].copy()
+
+        # Have the option to save/overwrite the auto_filtered files
+        savecheck = input("Save this to the output directory as auto_filtered? (y/n)")
+        if savecheck == 'y':
+            df.to_parquet(output_dir / f"auto_filtered_{file_path.name}")
+            print("Saved to the output directory as auto_filtered, note that this won't be logged!")
 
         print(f"\nFinal retention: {len(df)}/{original_count} ({(len(df)/original_count)*100:.1f}%)")
         return df
@@ -126,7 +158,7 @@ class XPSFilter:
         log_df.to_csv(output_dir / "filtering_log.csv", index=False)
         print("\nBatch Processing Complete. Log saved to filtering_log.csv")
 
-    def auto_batch_filter(self, input_dir: Path, output_dir: Path, n1: int, n2: int, threshold=20.0):
+    def auto_batch_filter(self, input_dir: Path, output_dir: Path, n1: int, n2: int, threshold1=20.0, threshold2=20.0):
         """
         Automatically filters all files. 
         Discards clusters representing < threshold % of the data in each pass.
@@ -143,7 +175,7 @@ class XPSFilter:
             df, _, labels1 = self._apply_gmm(df, n1, "pass1")
             counts1 = df['cluster_pass1'].value_counts(normalize=True) * 100
             # Keep clusters where % >= threshold
-            keep_ids1 = counts1[counts1 >= threshold].index.tolist()
+            keep_ids1 = counts1[counts1 >= threshold1].index.tolist()
             df = df[df['cluster_pass1'].isin(keep_ids1)].copy()
             count_after_p1 = len(df)
 
@@ -151,9 +183,10 @@ class XPSFilter:
             if count_after_p1 > n2:
                 df, _, labels2 = self._apply_gmm(df, n2, "pass2")
                 counts2 = df['cluster_pass2'].value_counts(normalize=True) * 100
-                keep_ids2 = counts2[counts2 >= threshold].index.tolist()
+                keep_ids2 = counts2[counts2 >= threshold2].index.tolist()
                 df = df[df['cluster_pass2'].isin(keep_ids2)].copy()
             
+            count_largest = df['cluster_pass2'].value_counts().max()
             count_final = len(df)
 
             # Save and Log
@@ -167,16 +200,26 @@ class XPSFilter:
                 "retention": (count_final / initial_count) * 100
             })
             print(f"File {f.name}: Retained {count_final} samples ({log_entries[-1]['retention']:.1f}%)")
+            print(f"File {f.name}: Largest cluster size after pass 2: {count_largest}")
 
         # Save Log
         pd.DataFrame(log_entries).to_csv(output_dir / "auto_filter_log.csv", index=False)
         print("\nAuto-batch processing complete.")
 
     def visualize_gmm(self, pca_features, labels, title):
-        plt.figure(figsize=(6, 4))
-        # Plot against PC2 and PC3 since PC1 was most likely intensity
-        plt.scatter(pca_features[:, 1], pca_features[:, 2], c=labels, cmap='viridis', s=5)
-        plt.title(title)
-        plt.colorbar(label="Cluster ID")
-        plt.show()
+        if self.n_pca >= 3:
+            plt.figure(figsize=(6, 4))
+            # Plot against PC2 and PC3 since PC1 was most likely intensity
+            plt.scatter(pca_features[:, 1], pca_features[:, 2], c=labels, cmap='viridis', s=5)
+            plt.title(title)
+            plt.colorbar(label="Cluster ID")
+            plt.show()
+        else:
+            print('n_pca < 3, plotting with PC1,PC2')
+            plt.figure(figsize=(6, 4))
+            # Plot against PC2 and PC3 since PC1 was most likely intensity
+            plt.scatter(pca_features[:, 0], pca_features[:, 1], c=labels, cmap='viridis', s=5)
+            plt.title(title)
+            plt.colorbar(label="Cluster ID")
+            plt.show()
 

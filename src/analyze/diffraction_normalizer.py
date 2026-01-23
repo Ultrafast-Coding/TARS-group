@@ -51,7 +51,8 @@ class DiffractionNormalizer:
         --------
         List of Path objects for each filtered_xps_{VALUE}.parquet file
         """
-        filtered_files = list(self.analysis_dir.glob("**/filtered_xps_*.parquet"))
+        filtered_dir = self.analysis_dir / 'filtered'
+        filtered_files = list(filtered_dir.glob("**/filtered_xps_*.parquet"))
         
         logger.info(f"Found {len(filtered_files)} filtered parquet files")
         return sorted(filtered_files)
@@ -457,7 +458,7 @@ class DiffractionNormalizer:
             avg_norm_factor_filtered = 100
 
             # Step 3: Save normalization factors to CSV
-            self.save_normalization_factors(df_filtered, filtered_file.parent, xps_value)
+            self.save_normalization_factors(df_filtered, filtered_file.parent.parent / 'normalized', xps_value)
             
             # Step 4: Normalize radial profiles
             df_normalized = self.normalize_radial_profiles(df_filtered, avg_norm_factor_filtered)
@@ -465,16 +466,16 @@ class DiffractionNormalizer:
             # Step 5: Calculate intensity profile statistics and save to CSV
             if statistic_type == 'normal':
                 stats_df = self.calculate_intensity_profile_stats(
-                    df_normalized, avg_norm_factor_filtered, filtered_file.parent, xps_value
+                    df_normalized, avg_norm_factor_filtered, filtered_file.parent.parent / 'normalized', xps_value
                 )
             elif statistic_type == 'bootstrap':
                 stats_df = self.calculate_intensity_bootstrap_stats(
-                    df_normalized, avg_norm_factor_filtered, filtered_file.parent, xps_value
+                    df_normalized, avg_norm_factor_filtered, filtered_file.parent.parent / 'normalized', xps_value
                 )
             
             # Optional: Save normalized data to new parquet file
             normalized_filename = f"normalized_xps_{xps_value:.5f}.parquet"
-            normalized_path = filtered_file.parent / normalized_filename
+            normalized_path = filtered_file.parent.parent / 'normalized' / normalized_filename
             df_normalized.to_parquet(normalized_path, index=False)
             logger.info(f"Saved normalized data to {normalized_filename}")
             

@@ -360,8 +360,8 @@ class RadialProfileFilter:
                 return False, "No data after MAD filtering"
             
             # Save filtered data
-            output_filename = f"filtered_{xps_dir.name}.parquet"
-            output_path = xps_dir.parent.parent / output_filename
+            output_filename = f"filtered_{xps_dir.name}"
+            output_path = xps_dir.parent.parent / "filtered" /output_filename
             
             df_final.to_parquet(output_path, index=False)
             
